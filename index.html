@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Video Splitter</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <style>
+    body { 
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+      padding: 20px; 
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      margin: 0;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background: white;
+      padding: 30px;
+      border-radius: 15px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    }
+    h2 { 
+      text-align: center; 
+      color: #333; 
+      margin-bottom: 30px;
+      font-size: 2em;
+    }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: #555;
+    }
+    input[type="file"], input[type="number"] {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      font-size: 16px;
+      transition: border-color 0.3s;
+    }
+    input[type="file"]:focus, input[type="number"]:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    button {
+      width: 100%;
+      padding: 15px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 18px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    button:hover {
+      transform: translateY(-2px);
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .log { 
+      margin-top: 20px; 
+      font-size: 14px; 
+      color: #333;
+      background: #f8f9fa;
+      padding: 15px;
+      border-radius: 8px;
+      border-left: 4px solid #667eea;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .progress {
+      width: 100%;
+      height: 8px;
+      background: #e0e0e0;
+      border-radius: 4px;
+      margin: 10px 0;
+      overflow: hidden;
+    }
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #667eea, #764ba2);
+      width: 0%;
+      transition: width 0.3s;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>🎬 Video Splitter</h2>
+
+    <div class="form-group">
+      <label for="uploader">Upload Video:</label>
+      <input type="file" id="uploader" accept="video/*">
+    </div>
+    
+    <div class="form-group">
+      <label for="duration">Chunk Duration (seconds):</label>
+      <input type="number" id="duration" value="60" min="1">
+    </div>
+
+    <div class="form-group">
+      <label for="overlap">Overlap (seconds):</label>
+      <input type="number" id="overlap" value="10" min="0">
+    </div>
+
+    <button id="processBtn">Split Video & Download ZIP</button>
+    
+    <div class="progress" id="progressContainer" style="display: none;">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+
+    <div class="log" id="log"></div>
+  </div>
+
+  <script>
+    const logBox = document.getElementById("log");
+    const progressContainer = document.getElementById("progressContainer");
+    const progressBar = document.getElementById("progressBar");
+    
+    // Backend API URL - works for both local and production
+    const API_BASE_URL = window.location.origin;
+
+    function log(msg) {
+      logBox.innerHTML += msg + "<br>";
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    function updateProgress(percent) {
+      progressBar.style.width = percent + '%';
+    }
+
+    function showProgress() {
+      progressContainer.style.display = 'block';
+    }
+
+    function hideProgress() {
+      progressContainer.style.display = 'none';
+    }
+
+    async function uploadVideo(file) {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const response = await fetch(`${API_BASE_URL}/upload`, {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Upload failed');
+      }
+      
+      return await response.json();
+    }
+
+    async function splitVideo(fileId, chunkDuration, overlap) {
+      const response = await fetch(`${API_BASE_URL}/split`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          file_id: fileId,
+          chunk_duration: chunkDuration,
+          overlap: overlap
+        })
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Split failed');
+      }
+      
+      return await response.json();
+    }
+
+    async function downloadZip(zipFilename) {
+      const response = await fetch(`${API_BASE_URL}/download/${zipFilename}`);
+      
+      if (!response.ok) {
+        throw new Error('Download failed');
+      }
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = zipFilename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    }
+
+    async function cleanupFiles(fileId) {
+      try {
+        await fetch(`${API_BASE_URL}/cleanup/${fileId}`, {
+          method: 'DELETE'
+        });
+      } catch (error) {
+        console.warn('Cleanup failed:', error);
+      }
+    }
+
+    document.getElementById("processBtn").onclick = async () => {
+      const fileInput = document.getElementById("uploader");
+      const chunkDuration = parseInt(document.getElementById("duration").value);
+      const overlap = parseInt(document.getElementById("overlap").value);
+
+      if (!fileInput.files.length) {
+        alert("Please upload a video first!");
+        return;
+      }
+
+      if (chunkDuration <= overlap) {
+        alert("Chunk duration must be greater than overlap!");
+        return;
+      }
+
+      const file = fileInput.files[0];
+      const processBtn = document.getElementById("processBtn");
+      let fileId = null;
+      
+      try {
+        processBtn.disabled = true;
+        processBtn.textContent = "Processing...";
+        showProgress();
+        
+        log("🚀 Starting video processing...");
+        log(`📁 File: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`);
+        log(`⏱️ Chunk duration: ${chunkDuration}s, Overlap: ${overlap}s`);
+
+        // Step 1: Upload video
+        log("📤 Uploading video to server...");
+        updateProgress(10);
+        const uploadResult = await uploadVideo(file);
+        fileId = uploadResult.file_id;
+        log(`✅ Video uploaded successfully (ID: ${fileId})`);
+
+        // Step 2: Split video
+        log("🔪 Splitting video into chunks...");
+        updateProgress(30);
+        const splitResult = await splitVideo(fileId, chunkDuration, overlap);
+        log(`✅ Video split into ${splitResult.chunk_count} chunks`);
+
+        // Step 3: Download ZIP
+        log("📦 Downloading ZIP file...");
+        updateProgress(80);
+        await downloadZip(splitResult.zip_filename);
+        log(`🎉 Success! Downloaded ${splitResult.zip_filename}`);
+        log(`📊 Created ${splitResult.chunk_count} video chunks`);
+
+        updateProgress(100);
+        
+      } catch (error) {
+        log(`❌ Error: ${error.message}`);
+        console.error(error);
+      } finally {
+        processBtn.disabled = false;
+        processBtn.textContent = "Split Video & Download ZIP";
+        hideProgress();
+        updateProgress(0);
+        
+        // Clean up files after a delay
+        if (fileId) {
+          setTimeout(() => {
+            cleanupFiles(fileId);
+            log("🧹 Cleaned up temporary files");
+          }, 5000);
+        }
+      }
+    };
+
+    // Check backend health on page load
+    window.addEventListener('load', async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/health`);
+        if (response.ok) {
+          log("✅ Backend server is ready!");
+        } else {
+          log("⚠️ Backend server is not responding");
+        }
+      } catch (error) {
+        log("❌ Cannot connect to backend server. Make sure it's running on " + API_BASE_URL);
+      }
+    });
+  </script>
+</body>
+</html>
