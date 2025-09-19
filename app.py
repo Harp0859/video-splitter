@@ -113,6 +113,33 @@ def api_info():
 def health():
     return jsonify({"status": "healthy"})
 
+@app.route('/check-ffmpeg')
+def check_ffmpeg():
+    """Check if FFmpeg is available on the system"""
+    try:
+        # Check ffmpeg
+        ffmpeg_result = subprocess.run(['ffmpeg', '-version'], 
+                                     capture_output=True, text=True, timeout=10)
+        ffmpeg_available = ffmpeg_result.returncode == 0
+        
+        # Check ffprobe
+        ffprobe_result = subprocess.run(['ffprobe', '-version'], 
+                                      capture_output=True, text=True, timeout=10)
+        ffprobe_available = ffprobe_result.returncode == 0
+        
+        return jsonify({
+            "ffmpeg_available": ffmpeg_available,
+            "ffprobe_available": ffprobe_available,
+            "ffmpeg_version": ffmpeg_result.stdout.split('\n')[0] if ffmpeg_available else None,
+            "ffprobe_version": ffprobe_result.stdout.split('\n')[0] if ffprobe_available else None
+        })
+    except Exception as e:
+        return jsonify({
+            "error": str(e),
+            "ffmpeg_available": False,
+            "ffprobe_available": False
+        })
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
