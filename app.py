@@ -7,7 +7,8 @@ from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import uuid
-from moviepy.editor import VideoFileClip
+import subprocess
+import os
 
 app = Flask(__name__)
 CORS(app)
@@ -24,9 +25,9 @@ os.makedirs(CHUNKS_FOLDER, exist_ok=True)
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def moviepy_split_video(video_path, output_dir, chunk_duration=60, overlap=10):
+def ffmpeg_split_video(video_path, output_dir="video_chunks", chunk_duration=60, overlap=10):
     """
-    Video splitter using MoviePy (works on Render free tier).
+    Super-fast video splitter using FFmpeg (lossless, no re-encoding).
     
     Args:
         video_path (str): Path to your video file.
@@ -39,55 +40,48 @@ def moviepy_split_video(video_path, output_dir, chunk_duration=60, overlap=10):
     """
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"❌ Video file not found: {video_path}")
-
+    
     os.makedirs(output_dir, exist_ok=True)
-
-    # Load video with MoviePy
-    video = VideoFileClip(video_path)
-    video_duration = video.duration
-
+    
+    # Get video duration using FFmpeg
+    cmd = [
+        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", video_path
+    ]
+    video_duration = float(subprocess.check_output(cmd).decode().strip())
+    
     print(f"🎬 Splitting: {os.path.basename(video_path)}")
     print(f"📁 Output: {output_dir}")
     print(f"⏱️ Duration: {video_duration/60:.1f} mins ({video_duration:.1f}s)")
     print(f"📦 Chunk size: {chunk_duration}s with {overlap}s overlap\n")
-
+    
     chunk_paths = []
     start_time = 0
     chunk_num = 1
-
+    
     while start_time < video_duration:
         end_time = min(start_time + chunk_duration, video_duration)
         output_path = os.path.join(output_dir, f"chunk_{chunk_num:03d}.mp4")
-
+        
         print(f"🔹 Chunk {chunk_num} → {start_time:.1f}s → {end_time:.1f}s")
-
-        try:
-            # Extract chunk using MoviePy
-            chunk = video.subclip(start_time, end_time)
-            chunk.write_videofile(
-                output_path, 
-                codec='libx264', 
-                audio_codec='aac',
-                temp_audiofile='temp-audio.m4a',
-                remove_temp=True,
-                verbose=False,
-                logger=None
-            )
-            chunk.close()
-            chunk_paths.append(output_path)
-            print(f"✅ Created {output_path}")
-            
-        except Exception as e:
-            print(f"❌ Error creating chunk {chunk_num}: {str(e)}")
-
+        
+        # Build FFmpeg command (no re-encoding → super fast)
+        cmd = [
+            "ffmpeg", "-y", "-ss", str(start_time), "-to", str(end_time),
+            "-i", video_path, "-c", "copy", output_path
+        ]
+        
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        chunk_paths.append(output_path)
+        print(f"✅ Created {output_path}")
+        
         # Move to next start time considering overlap
         start_time += chunk_duration - overlap
         chunk_num += 1
-
+        
         if start_time >= video_duration:
             break
-
-    video.close()
+    
     print(f"\n✅ Done! Created {len(chunk_paths)} chunks in '{output_dir}'\n")
     return chunk_paths
 
@@ -165,7 +159,7 @@ def split_video():
         output_dir = os.path.join(CHUNKS_FOLDER, f"{file_id}_chunks")
         
         # Split the video
-        chunk_paths = moviepy_split_video(
+        chunk_paths = ffmpeg_split_video(
             video_path=file_path,
             output_dir=output_dir,
             chunk_duration=chunk_duration,
