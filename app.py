@@ -48,7 +48,11 @@ def ffmpeg_split_video(video_path, output_dir="video_chunks", chunk_duration=60,
         "ffprobe", "-v", "error", "-show_entries", "format=duration",
         "-of", "default=noprint_wrappers=1:nokey=1", video_path
     ]
-    video_duration = float(subprocess.check_output(cmd).decode().strip())
+    try:
+        video_duration = float(subprocess.check_output(cmd).decode().strip())
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Error getting video duration: {e}")
+        raise e
     
     print(f"🎬 Splitting: {os.path.basename(video_path)}")
     print(f"📁 Output: {output_dir}")
@@ -71,9 +75,13 @@ def ffmpeg_split_video(video_path, output_dir="video_chunks", chunk_duration=60,
             "-i", video_path, "-c", "copy", output_path
         ]
         
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        chunk_paths.append(output_path)
-        print(f"✅ Created {output_path}")
+        try:
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            chunk_paths.append(output_path)
+            print(f"✅ Created {output_path}")
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Error creating chunk {chunk_num}: {e}")
+            continue
         
         # Move to next start time considering overlap
         start_time += chunk_duration - overlap
